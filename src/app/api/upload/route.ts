@@ -3,33 +3,40 @@ import OSS from "ali-oss";
 import { v4 as uuidv4 } from "uuid";
 
 // Check if all required environment variables are set
-const requiredEnvVars = {
-  region: process.env.OSS_REGION || process.env.NEXT_PUBLIC_OSS_REGION,
-  accessKeyId:
-    process.env.OSS_ACCESS_KEY_ID || process.env.NEXT_PUBLIC_OSS_ACCESS_KEY_ID,
-  accessKeySecret:
-    process.env.OSS_ACCESS_KEY_SECRET ||
-    process.env.NEXT_PUBLIC_OSS_ACCESS_KEY_SECRET,
-  bucket: process.env.OSS_BUCKET || process.env.NEXT_PUBLIC_OSS_BUCKET,
-};
-
-// Validate environment variables
-const missingEnvVars = Object.entries(requiredEnvVars)
-  .filter(([_, value]) => !value)
-  .map(([key]) => key);
-
-if (missingEnvVars.length > 0) {
-  console.error(
-    `Missing required environment variables: ${missingEnvVars.join(", ")}`
-  );
+function getOSSConfig() {
+  return {
+    region: process.env.OSS_REGION || process.env.NEXT_PUBLIC_OSS_REGION,
+    accessKeyId:
+      process.env.OSS_ACCESS_KEY_ID || process.env.NEXT_PUBLIC_OSS_ACCESS_KEY_ID,
+    accessKeySecret:
+      process.env.OSS_ACCESS_KEY_SECRET ||
+      process.env.NEXT_PUBLIC_OSS_ACCESS_KEY_SECRET,
+    bucket: process.env.OSS_BUCKET || process.env.NEXT_PUBLIC_OSS_BUCKET,
+  };
 }
 
-const client = new OSS({
-  region: requiredEnvVars.region!,
-  accessKeyId: requiredEnvVars.accessKeyId!,
-  accessKeySecret: requiredEnvVars.accessKeySecret!,
-  bucket: requiredEnvVars.bucket!,
-});
+// Validate and create OSS client
+function createOSSClient() {
+  const config = getOSSConfig();
+
+  // Validate environment variables
+  const missingEnvVars = Object.entries(config)
+    .filter(([_, value]) => !value)
+    .map(([key]) => key);
+
+  if (missingEnvVars.length > 0) {
+    throw new Error(
+      `OSS not configured. Missing environment variables: ${missingEnvVars.join(", ")}. Please configure OSS settings in .env.local`
+    );
+  }
+
+  return new OSS({
+    region: config.region!,
+    accessKeyId: config.accessKeyId!,
+    accessKeySecret: config.accessKeySecret!,
+    bucket: config.bucket!,
+  });
+}
 
 // 重试配置
 const RETRY_CONFIG = {
@@ -67,6 +74,10 @@ async function uploadWithRetry(
 
 export async function POST(request: Request) {
   try {
+    // Create OSS client on demand
+    const client = createOSSClient();
+    const config = getOSSConfig();
+
     const formData = await request.formData();
     const file = formData.get("file") as File;
     const directory = formData.get("directory") as string || "articles"; // 获取目录参数
@@ -116,7 +127,7 @@ export async function POST(request: Request) {
     const result = await uploadWithRetry(client, filename, buffer);
 
     // 构建完整的URL
-    const url = `https://${requiredEnvVars.bucket}.${requiredEnvVars.region}.aliyuncs.com/${filename}`;
+    const url = `https://${config.bucket}.${config.region}.aliyuncs.com/${filename}`;
 
     return NextResponse.json({ url });
   } catch (error: any) {
