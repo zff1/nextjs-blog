@@ -177,7 +177,14 @@ export function withErrorHandler<T extends any[], R>(
     handler: (...args: T) => Promise<NextResponse<ApiResponse<R>>>
 ) {
     return async (...args: T): Promise<NextResponse<ApiResponse<R>>> => {
+        const startTime = Date.now();
+        const request = args[0] as Request;
+        const url = new URL(request.url);
+        const apiPath = url.pathname;
+
         try {
+            console.log(`🚀 [API] ${request.method} ${apiPath} - 开始处理`);
+
             const response = await handler(...args);
             const responseData = await response.json();
 
@@ -198,12 +205,16 @@ export function withErrorHandler<T extends any[], R>(
                 }
             }
 
+            const duration = Date.now() - startTime;
+            console.log(`✅ [API] ${request.method} ${apiPath} - 成功 (${duration}ms)`);
+
             return NextResponse.json(responseData, {
                 status: response.status,
                 headers: response.headers
             });
         } catch (error) {
-            console.error('API Error:', error);
+            const duration = Date.now() - startTime;
+            console.error(`❌ [API] ${request.method} ${apiPath} - 失败 (${duration}ms)`, error);
 
             if (error instanceof ApiError) {
                 return errorResponse(error);

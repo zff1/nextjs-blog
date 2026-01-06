@@ -7,6 +7,22 @@ const nextConfig = {
     // 敏感信息只应通过服务端使用
   },
 
+  // 启用 SWC 压缩（比 Terser 更快）
+  swcMinify: true,
+
+  // 生产环境优化
+  productionBrowserSourceMaps: false, // 禁用生产环境的 source maps
+
+  // 优化导入，减少 bundle 大小
+  modularizeImports: {
+    "@ant-design/icons": {
+      transform: "@ant-design/icons/{{member}}",
+    },
+    "lodash-es": {
+      transform: "lodash-es/{{member}}",
+    },
+  },
+
   images: {
     domains: [
       "images.unsplash.com",
@@ -66,7 +82,27 @@ const nextConfig = {
   async headers() {
     return [
       {
-        // 为所有路由添加安全头
+        // 为静态资源（JS、CSS、图片等）设置强缓存
+        source: "/_next/static/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        // 为图片资源设置缓存
+        source: "/images/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=86400, stale-while-revalidate=604800",
+          },
+        ],
+      },
+      {
+        // 为 HTML 页面设置协商缓存
         source: "/:path*",
         headers: [
           {
@@ -91,14 +127,18 @@ const nextConfig = {
           },
           {
             key: "Cache-Control",
-            value: "no-store",
+            value: "public, max-age=0, must-revalidate",
           },
         ],
       },
       {
-        // 为 API 路由添加 CORS 配置
+        // 为 API 路由禁用缓存并添加 CORS 配置
         source: "/api/:path*",
         headers: [
+          {
+            key: "Cache-Control",
+            value: "no-store, max-age=0",
+          },
           {
             key: "Access-Control-Allow-Origin",
             value: process.env.ALLOWED_ORIGIN || "*", // 生产环境应该设置具体域名
