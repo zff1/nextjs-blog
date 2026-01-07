@@ -25,7 +25,7 @@ export interface RequestConfig extends AxiosRequestConfig {
  * 开发环境使用本地代理，生产环境使用后端API地址
  */
 const initConfig = {
-    baseURL: isDev ? 'http://localhost:3000' : process.env.NEXT_PUBLIC_API_URL || '',
+    baseURL: '',  // 空字符串，processUrl 会自动添加 /api 前缀
     timeout: 10000,
     withCredentials: true
 }
