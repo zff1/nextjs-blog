@@ -33,7 +33,8 @@ const nextConfig = {
       "object-x.net.cn",
       "sealoshzh.site",
       "p0-xtjj-private.juejin.cn",
-    ],
+      process.env.QINIU_DOMAIN_HOSTNAME, // 从环境变量读取七牛域名
+    ].filter(Boolean),
     remotePatterns: [
       {
         protocol: "https",
@@ -66,6 +67,30 @@ const nextConfig = {
       {
         protocol: "http",
         hostname: "object-x.net.cn",
+      },
+      {
+        protocol: "http",
+        hostname: "**.qiniudn.com",
+      },
+      {
+        protocol: "https",
+        hostname: "**.qiniudn.com",
+      },
+      {
+        protocol: "http",
+        hostname: "**.qbox.me",
+      },
+      {
+        protocol: "https",
+        hostname: "**.qbox.me",
+      },
+      {
+        protocol: "http",
+        hostname: "**.clouddn.com",
+      },
+      {
+        protocol: "https",
+        hostname: "**.clouddn.com",
       },
     ],
   },

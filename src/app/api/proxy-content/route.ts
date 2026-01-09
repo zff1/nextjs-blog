@@ -6,8 +6,13 @@ export const dynamic = 'force-dynamic';
 // 允许的域名配置
 const ALLOWED_DOMAINS = [
     'next-blog.oss-cn-beijing.aliyuncs.com',
+    'qiniudn.com',
+    'qbox.me',
+    'clouddn.com',
+    process.env.QINIU_DOMAIN_HOSTNAME,
     // 可以添加其他允许的域名
-];
+].filter(Boolean) as string[];
+
 
 // 响应接口
 interface ProxyContentResponse {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import OSS from "ali-oss";
+import qiniu from "qiniu";
 import { v4 as uuidv4 } from "uuid";
 
 // Check if all required environment variables are set
@@ -15,6 +16,15 @@ function getOSSConfig() {
   };
 }
 
+function getQiniuConfig() {
+  return {
+    accessKey: process.env.QINIU_ACCESS_KEY,
+    secretKey: process.env.QINIU_SECRET_KEY,
+    bucket: process.env.QINIU_BUCKET,
+    domain: process.env.QINIU_DOMAIN,
+  };
+}
+
 // Validate and create OSS client
 function createOSSClient() {
   const config = getOSSConfig();
@@ -26,7 +36,7 @@ function createOSSClient() {
 
   if (missingEnvVars.length > 0) {
     throw new Error(
-      `OSS not configured. Missing environment variables: ${missingEnvVars.join(", ")}. Please configure OSS settings in .env.local`
+      `Alibaba OSS not configured. Missing environment variables: ${missingEnvVars.join(", ")}.`
     );
   }
 
@@ -38,55 +48,89 @@ function createOSSClient() {
   });
 }
 
+// Create Qiniu upload token
+function getQiniuToken() {
+  const config = getQiniuConfig();
+  if (!config.accessKey || !config.secretKey || !config.bucket) {
+    throw new Error("Qiniu OSS not configured. Missing AccessKey, SecretKey or Bucket.");
+  }
+  const mac = new qiniu.auth.digest.Mac(config.accessKey, config.secretKey);
+  const putPolicy = new qiniu.rs.PutPolicy({ scope: config.bucket });
+  return putPolicy.uploadToken(mac);
+}
+
+// 获取存储策略
+const STORAGE_PROVIDER = process.env.STORAGE_PROVIDER || 'aliyun';
+
 // 重试配置
 const RETRY_CONFIG = {
   maxRetries: 3,
-  initialDelay: 1000, // 1秒
-  maxDelay: 5000, // 5秒
+  initialDelay: 1000,
+  maxDelay: 5000,
 };
 
-// 延迟函数
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// 带重试的上传函数
-async function uploadWithRetry(
+async function uploadToAliyun(
   client: OSS,
   filename: string,
   buffer: Buffer,
   attempt: number = 1
-): Promise<OSS.PutObjectResult> {
+): Promise<string> {
+  const config = getOSSConfig();
   try {
-    return await client.put(filename, buffer);
+    await client.put(filename, buffer);
+    return `https://${config.bucket}.${config.region}.aliyuncs.com/${filename}`;
   } catch (err) {
-    if (attempt >= RETRY_CONFIG.maxRetries) {
-      throw err;
-    }
-
-    const delayTime = Math.min(
-      RETRY_CONFIG.initialDelay * Math.pow(2, attempt - 1),
-      RETRY_CONFIG.maxDelay
-    );
-    await delay(delayTime);
-
-    return uploadWithRetry(client, filename, buffer, attempt + 1);
+    if (attempt >= RETRY_CONFIG.maxRetries) throw err;
+    await delay(Math.min(RETRY_CONFIG.initialDelay * Math.pow(2, attempt - 1), RETRY_CONFIG.maxDelay));
+    return uploadToAliyun(client, filename, buffer, attempt + 1);
   }
+}
+
+async function uploadToQiniu(
+  filename: string,
+  buffer: Buffer,
+  attempt: number = 1
+): Promise<string> {
+  const config = getQiniuConfig();
+  const token = getQiniuToken();
+  const qiniuConfig = new qiniu.conf.Config();
+  const formUploader = new qiniu.form_up.FormUploader(qiniuConfig);
+  const putExtra = new qiniu.form_up.PutExtra();
+
+  return new Promise((resolve, reject) => {
+    formUploader.put(token, filename, buffer, putExtra, (respErr, respBody, respInfo) => {
+      if (respErr) {
+        if (attempt < RETRY_CONFIG.maxRetries) {
+          delay(Math.min(RETRY_CONFIG.initialDelay * Math.pow(2, attempt - 1), RETRY_CONFIG.maxDelay))
+            .then(() => uploadToQiniu(filename, buffer, attempt + 1))
+            .then(resolve)
+            .catch(reject);
+        } else {
+          reject(respErr);
+        }
+        return;
+      }
+      if (respInfo.statusCode === 200) {
+        // 构建七牛 URL
+        const domain = config.domain?.replace(/\/$/, '');
+        resolve(`${domain}/${filename}`);
+      } else {
+        reject(new Error(`Qiniu upload failed with status ${respInfo.statusCode}`));
+      }
+    });
+  });
 }
 
 export async function POST(request: Request) {
   try {
-    // Create OSS client on demand
-    const client = createOSSClient();
-    const config = getOSSConfig();
-
     const formData = await request.formData();
     const file = formData.get("file") as File;
-    const directory = formData.get("directory") as string || "articles"; // 获取目录参数
+    const directory = formData.get("directory") as string || "articles";
 
     if (!file) {
-      return NextResponse.json(
-        { error: "No file provided" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
     // 检查文件类型
@@ -96,22 +140,14 @@ export async function POST(request: Request) {
     );
 
     if (!isAllowedType) {
-      return NextResponse.json(
-        { error: "Only markdown, image and video files are allowed" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Only markdown, image and video files are allowed" }, { status: 400 });
     }
 
-    // 获取文件扩展名
     const extension = file.name.split(".").pop()?.toLowerCase();
     if (!extension) {
-      return NextResponse.json(
-        { error: "Invalid file extension" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Invalid file extension" }, { status: 400 });
     }
 
-    // 根据文件类型决定存储路径
     let basePath = "articles";
     if (file.type.startsWith("image/")) {
       basePath = "images";
@@ -119,15 +155,15 @@ export async function POST(request: Request) {
       basePath = "videos";
     }
     const filename = `${basePath}/${directory}/${uuidv4()}.${extension}`;
-
-    // 读取文件内容
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // 上传文件到OSS
-    const result = await uploadWithRetry(client, filename, buffer);
-
-    // 构建完整的URL
-    const url = `https://${config.bucket}.${config.region}.aliyuncs.com/${filename}`;
+    let url = "";
+    if (STORAGE_PROVIDER === 'qiniu') {
+      url = await uploadToQiniu(filename, buffer);
+    } else {
+      const client = createOSSClient();
+      url = await uploadToAliyun(client, filename, buffer);
+    }
 
     return NextResponse.json({ url });
   } catch (error: any) {
@@ -138,3 +174,4 @@ export async function POST(request: Request) {
     );
   }
 }
+

@@ -52,7 +52,11 @@ export default function FriendsManagementPage() {
   }, [previewUrl, editingPreviewUrl]);
 
   const isOssUrl = (url: string) => {
-    return url.includes(".aliyuncs.com/");
+    return url.includes(".aliyuncs.com/") ||
+      url.includes("qiniudn.com/") ||
+      url.includes("qbox.me/") ||
+      url.includes("clouddn.com/") ||
+      (process.env.NEXT_PUBLIC_QINIU_DOMAIN && url.includes(process.env.NEXT_PUBLIC_QINIU_DOMAIN));
   };
 
   const uploadImageFromUrl = async (imageUrl: string) => {
